@@ -130,6 +130,11 @@ void tx_fifo_service(void) {
         case IDLE:
             bytes_available = spsc_queue_level(&tx_fifo);
             if (bytes_available) {
+                //flush if no host connected (prevents filling the FIFO and blocking Core0 when no terminal is attached)
+                if (!tud_cdc_n_connected(0)) {
+                    spsc_queue_flush(&tx_fifo);
+                    return;
+                }
                 i = 0;
                 while (spsc_queue_try_remove(&tx_fifo, (uint8_t*)&data[i])) {
                     i++;
@@ -230,7 +235,7 @@ void tx_fifo_put(char* c) {
 }
 
 void tx_fifo_try_put(char* c) {
-    BP_ASSERT_CORE0(); // tx fifo shoudl only be added to from core 0 (deadlock risk)
+    BP_ASSERT_CORE0(); // tx fifo should only be added to from core 0 (deadlock risk)
     spsc_queue_try_add(&tx_fifo, (uint8_t)*c);
 }
 

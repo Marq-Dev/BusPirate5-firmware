@@ -488,12 +488,24 @@ static void core0_infinite_loop(void) {
 
     lcd_screensaver_alarm_reset(); //setup the screensaver timer (if configured)
 
+    button_irq_enable(0, &button_irq_callback);
+
     while (1) {
 
         // co-op multitask **when not actively doing anything**
         // core 2 handles USB and other sensitive stuff, so it's not critical to co-op multitask
         // but the terminal will not be responsive if the service is blocking
         binmode_service();
+
+        //if not connected to a terminal, then check for button presses to allow user to execute button scripts without a terminal connected
+        if (!tud_cdc_n_connected(0)|| bp_state <= BP_SM_DISPLAY_MODE_WAIT){
+            enum button_codes press_code = button_check_press(0);
+            if (press_code != BP_BUTT_NO_PRESS) {
+                button_irq_disable(0);
+                button_exec(press_code);         // execute script based on the button press type
+                button_irq_enable(0, &button_irq_callback);
+            }
+        }
 
         if (tud_cdc_n_connected(0)) {
             if (!has_been_connected) {

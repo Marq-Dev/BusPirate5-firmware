@@ -264,6 +264,23 @@ static inline bool spsc_queue_is_empty(spsc_queue_t* q) {
 }
 
 /**
+ * @brief Empty the queue by discarding all pending bytes
+ *
+ * @param q     Pointer to queue
+ *
+ * @pre Must be called from the consumer core only
+ * @note Advances tail to the currently observed head. Bytes added by the
+ *       producer concurrently with this call may remain in the queue.
+ */
+static inline void spsc_queue_flush(spsc_queue_t* q) {
+    // Snapshot head; acquire barrier ensures any data writes published by
+    // the producer before head update are visible (consistent with try_remove).
+    uint32_t head = q->head;
+    __dmb();
+    q->tail = head;
+}
+
+/**
  * @brief Check if queue is full
  * 
  * @param q     Pointer to queue
