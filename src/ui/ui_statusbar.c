@@ -18,6 +18,10 @@
 /* Height of the status bar in terminal lines */
 #define STATUSBAR_HEIGHT 4
 
+/* Safe buffer-remaining helper — returns 0 instead of wrapping when exhausted.
+ * Mirrors the REM() macro used in ui_pin_render.c. */
+#define SREM(len, total) ((len) < (total) ? (total) - (len) : 0u)
+
 /* Forward declaration — Core1 content callback, defined below. */
 static uint32_t statusbar_update_core1_cb(toolbar_t* tb, char* buf, size_t buf_len,
                                           uint16_t start_row, uint16_t width,
@@ -45,11 +49,11 @@ static uint32_t ui_statusbar_info(char* buf, size_t buffLen) {
     uint32_t temp = 0;
     uint32_t cnt = 0;
 
-    len += ui_term_color_text_background_buf(&buf[len], buffLen - len, 0x000000, BP_COLOR_GREY);
+    len += ui_term_color_text_background_buf(&buf[len], SREM(len, buffLen), 0x000000, BP_COLOR_GREY);
 
     if (psu_status.enabled) {
         temp = snprintf(&buf[len],
-                        buffLen - len,
+                        SREM(len, buffLen),
                         "Vout: %u.%uV",
                         (psu_status.voltage_actual_int) / 10000,
                         ((psu_status.voltage_actual_int) % 10000) / 100);
@@ -58,7 +62,7 @@ static uint32_t ui_statusbar_info(char* buf, size_t buffLen) {
 
         if (!psu_status.current_limit_override) {
             temp = snprintf(&buf[len],
-                            buffLen - len,
+                            SREM(len, buffLen),
                             "/%u.%umA max",
                             (psu_status.current_actual_int) / 10000,
                             ((psu_status.current_actual_int) % 10000) / 100);
@@ -68,14 +72,14 @@ static uint32_t ui_statusbar_info(char* buf, size_t buffLen) {
 
         if(!psu_status.undervoltage_limit_override){
             temp = snprintf(&buf[len],
-                            buffLen - len,
+                            SREM(len, buffLen),
                             "/%u.%uV min",
                             (psu_status.undervoltage_limit_int) / 10000,
                             ((psu_status.undervoltage_limit_int) % 10000) / 100);
             len += temp;
             cnt += temp;
         }
-        temp = snprintf(&buf[len], buffLen - len, " | ");
+        temp = snprintf(&buf[len], SREM(len, buffLen), " | ");
         len += temp;
         cnt += temp;
     }
@@ -83,7 +87,7 @@ static uint32_t ui_statusbar_info(char* buf, size_t buffLen) {
     if (psu_status.error_overcurrent) {
         // show Power Supply: ERROR
         temp = snprintf(&buf[len],
-                        buffLen - len,
+                        SREM(len, buffLen),
                         "Vout: ERROR > %u.%umA | ",
                         (psu_status.current_actual_int) / 10000,
                         ((psu_status.current_actual_int) % 10000) / 100);
@@ -92,7 +96,7 @@ static uint32_t ui_statusbar_info(char* buf, size_t buffLen) {
     }else if (psu_status.error_undervoltage){
         // show Power Supply: ERROR
         temp = snprintf(&buf[len],
-                        buffLen - len,
+                        SREM(len, buffLen),
                         "Vout: ERROR < %u.%uV | ",
                         (psu_status.undervoltage_limit_int) / 10000,
                         ((psu_status.undervoltage_limit_int) % 10000) / 100);
@@ -103,22 +107,22 @@ static uint32_t ui_statusbar_info(char* buf, size_t buffLen) {
     if (system_config.pullup_enabled) {
         // show Pull-up resistors ON
         temp = snprintf(&buf[len],
-                        buffLen - len,
+                        SREM(len, buffLen),
                         "Pull-ups: ON | ");
         len += temp;
         cnt += temp;
     }
     if (scope_running) { // scope is using the analog subsystem
-        temp = snprintf(&buf[len], buffLen - len, "V update slower when scope running");
+        temp = snprintf(&buf[len], SREM(len, buffLen), "V update slower when scope running");
         len += temp;
         cnt += temp;
     }
     // Pad remaining columns with background color to avoid erase flicker
-    uint16_t width = system_config.terminal_ansi_columns;
+    uint16_t width = (system_config.terminal_ansi_columns>80?80:system_config.terminal_ansi_columns);
     for (uint16_t c = cnt; c < width; c++) {
         if (len < buffLen - 1) buf[len++] = ' ';
     }
-    len += snprintf(&buf[len], buffLen - len, "%s", ui_term_color_reset()); // snprintf to buffer
+    len += snprintf(&buf[len], SREM(len, buffLen), "%s", ui_term_color_reset()); // snprintf to buffer
     return len;
 }
 
@@ -139,28 +143,28 @@ static uint32_t statusbar_update_core1_cb(toolbar_t* tb, char* buf, size_t buf_l
 
     if (update_flags & UI_UPDATE_INFOBAR) {
         monitor_force_update();
-        len += ui_term_cursor_position_buf(&buf[len], buf_len - len, start_row, 0);
-        len += ui_statusbar_info(&buf[len], buf_len - len);
+        len += ui_term_cursor_position_buf(&buf[len], SREM(len, buf_len), start_row, 0);
+        len += ui_statusbar_info(&buf[len], SREM(len, buf_len));
     }
 
     if (update_flags & UI_UPDATE_NAMES) {
-        len += ui_term_cursor_position_buf(&buf[len], buf_len - len, start_row + 1, 0);
-        len += ui_pin_render_names(&buf[len], buf_len - len, sb_flags);
+        len += ui_term_cursor_position_buf(&buf[len], SREM(len, buf_len), start_row + 1, 0);
+        len += ui_pin_render_names(&buf[len], SREM(len, buf_len), sb_flags);
     }
 
     if ((update_flags & UI_UPDATE_CURRENT) && !(update_flags & UI_UPDATE_LABELS)) {
-        len += ui_term_cursor_position_buf(&buf[len], buf_len - len, start_row + 2, 0);
-        len += ui_pin_render_labels(&buf[len], buf_len - len, sb_flags);
+        len += ui_term_cursor_position_buf(&buf[len], SREM(len, buf_len), start_row + 2, 0);
+        len += ui_pin_render_labels(&buf[len], SREM(len, buf_len), sb_flags);
     }
 
     if (update_flags & UI_UPDATE_LABELS) {
-        len += ui_term_cursor_position_buf(&buf[len], buf_len - len, start_row + 2, 0);
-        len += ui_pin_render_labels(&buf[len], buf_len - len, sb_flags);
+        len += ui_term_cursor_position_buf(&buf[len], SREM(len, buf_len), start_row + 2, 0);
+        len += ui_pin_render_labels(&buf[len], SREM(len, buf_len), sb_flags);
     }
 
     if (update_flags & UI_UPDATE_VOLTAGES) {
-        len += ui_term_cursor_position_buf(&buf[len], buf_len - len, start_row + 3, 0);
-        len += ui_pin_render_values(&buf[len], buf_len - len, sb_flags);
+        len += ui_term_cursor_position_buf(&buf[len], SREM(len, buf_len), start_row + 3, 0);
+        len += ui_pin_render_values(&buf[len], SREM(len, buf_len), sb_flags);
     }
 
     return len;

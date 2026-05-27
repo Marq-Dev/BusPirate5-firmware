@@ -123,11 +123,20 @@ void i_info_handler(struct command_result* res) {
         printf("%s: %s\r\n", GET_T(T_INFO_TF_CARD), GET_T(T_NOT_DETECTED));
     }
 
+    if(system_config.terminal_ansi_color){
+        //show terminal size if detected
+        printf("Terminal: %s%u%sx%s%u%s\r\n",
+               ui_term_color_num_float(),
+               system_config.terminal_ansi_columns,
+               ui_term_color_reset(),
+               ui_term_color_num_float(),
+               system_config.terminal_ansi_rows,
+               ui_term_color_reset());
+    }
+
     // config file loaded
-    do {
-        const char* string = system_config.config_loaded_from_file ? GET_T(T_LOADED) : GET_T(T_NOT_DETECTED);
-        printf("\r\n%s%s:%s %s\r\n", ui_term_color_info(), GET_T(T_CONFIG_FILE), ui_term_color_reset(), string);
-    } while (0);
+    const char* string = system_config.config_loaded_from_file ? GET_T(T_LOADED) : GET_T(T_NOT_DETECTED);
+    printf("\r\n%s%s:%s %s\r\n", ui_term_color_info(), GET_T(T_CONFIG_FILE), ui_term_color_reset(), string);
 
     // Current binmode 
     printf("%sActive binmode:%s %s\r\n", ui_term_color_info(), ui_term_color_reset(), binmodes[system_config.binmode_select].binmode_name);

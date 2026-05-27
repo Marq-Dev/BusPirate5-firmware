@@ -75,8 +75,8 @@ typedef struct _system_config {
 
     /** @name Terminal Display Settings */
     /**@{*/
-    uint8_t terminal_ansi_rows;                  /**< Terminal rows for ANSI display */
-    uint8_t terminal_ansi_columns;               /**< Terminal columns for ANSI display */
+    uint16_t terminal_ansi_rows;                  /**< Terminal rows for ANSI display */
+    uint16_t terminal_ansi_columns;               /**< Terminal columns for ANSI display */
     uint32_t terminal_ansi_color;                /**< ANSI color scheme */
     uint32_t terminal_ansi_statusbar;            /**< Status bar display mode */
     bool terminal_hide_cursor;                   /**< Hide terminal cursor */
