@@ -106,8 +106,8 @@ bool ui_term_detect_vt100(uint32_t* row, uint32_t* col) {
         ;
 
     // Sanity-check: reject obviously bogus values.
-    // No real terminal is smaller than 10x20 or larger than 500x500.
-    if (r < 10 || r > 500 || c < 20 || c > 500) {
+    // No real terminal is smaller than 10x20 ~~or larger than 500x500~~.
+    if (r < 10 || r > 0xffff || c < 20 || c > 0xffff) {
         return false;
     }
 

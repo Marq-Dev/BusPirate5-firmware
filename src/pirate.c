@@ -561,6 +561,9 @@ static void core0_infinite_loop(void) {
 
                 display_mode_done_saved:// case were configuration already exists
                     if (!ui_term_detect()) { // Do we detect a VT100 ANSI terminal? what is the size?
+                        system_config.terminal_ansi_color = UI_TERM_NO_COLOR;
+                        system_config.terminal_ansi_statusbar = false;                        
+                        bp_state = BP_SM_COMMAND_PROMPT;
                         break;
                     }
                     // if something goes wrong with detection, the next function will skip internally
