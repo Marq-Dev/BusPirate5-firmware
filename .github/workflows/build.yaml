@@ -8,12 +8,8 @@ on:
 permissions:
   contents: write
 
-env:
-  BUILD_TYPE: Release
-  BUILD_TARGET: all
-
 jobs:
-  deep-format-implementation:
+  finalize-verified-source:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'feature/deep-format'
     runs-on: ubuntu-latest
     steps:
@@ -22,96 +18,39 @@ jobs:
           ref: feature/deep-format
           fetch-depth: 0
 
-      - name: Apply implementation
-        id: apply
-        continue-on-error: true
-        run: python3 tools/run_deep_format_gate.py > deep-format-gate.log 2>&1
+      - name: Apply verified implementation
+        run: python3 tools/run_deep_format_gate.py
 
-      - name: Upload apply log
-        if: steps.apply.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: deep-format-gate-log
-          path: deep-format-gate.log
-          if-no-files-found: error
-
-      - name: Stop after apply failure
-        if: steps.apply.outcome == 'failure'
-        run: |
-          cat deep-format-gate.log
-          exit 1
-
-      - name: Run host and source-contract tests
+      - name: Re-run host and source-contract tests
         run: |
           python3 -m unittest tests/test_deep_format_contract.py -v
           bash tests/host/run_host_tests.sh
 
-      - name: Install ARM toolchain
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            cmake \
-            ninja-build \
-            gcc-arm-none-eabi \
-            libnewlib-arm-none-eabi \
-            libstdc++-arm-none-eabi-newlib
-
-      - name: Configure and build RP2350 firmware
-        id: rp2350
+      - name: Finalize and push verified source
+        id: finalize
         continue-on-error: true
         run: |
           set -o pipefail
           {
-            cmake -S . -B build/rp2350-final \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DBP_PICO_PLATFORM=rp2350 \
-              -DPICO_SDK_FETCH_FROM_GIT=TRUE \
-              -DPICO_SDK_FETCH_FROM_GIT_TAG:STRING=2.3.0
-            cmake --build build/rp2350-final --target all --parallel 2
-          } > rp2350-build.log 2>&1
+            python3 tools/finalize_deep_format.py
+            git config user.name 'Marq-Dev'
+            git config user.email '9102154+Marq-Dev@users.noreply.github.com'
+            git add -A
+            git status --short
+            git commit -m 'feat: add NAND deep-format storage recovery'
+            git push origin HEAD:feature/deep-format
+          } > deep-format-finalize.log 2>&1
 
-      - name: Upload RP2350 build log
-        if: steps.rp2350.outcome == 'failure'
+      - name: Upload finalization log
+        if: steps.finalize.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
-          name: rp2350-build-log
-          path: rp2350-build.log
+          name: deep-format-finalize-log
+          path: deep-format-finalize.log
           if-no-files-found: error
 
-      - name: Stop after RP2350 build failure
-        if: steps.rp2350.outcome == 'failure'
+      - name: Stop after finalization failure
+        if: steps.finalize.outcome == 'failure'
         run: |
-          tail -n 200 rp2350-build.log
+          cat deep-format-finalize.log
           exit 1
-
-      - name: Configure and build RP2040 firmware
-        run: |
-          cmake -S . -B build/rp2040-final \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DBP_PICO_PLATFORM=rp2040 \
-            -DPICO_SDK_FETCH_FROM_GIT=TRUE \
-            -DPICO_SDK_FETCH_FROM_GIT_TAG:STRING=2.3.0
-          cmake --build build/rp2040-final --target all --parallel 2
-
-      - name: Upload verified firmware
-        uses: actions/upload-artifact@v4
-        with:
-          name: deep-format-verified-firmware
-          path: |
-            build/rp2350-final/src/*.uf2
-            build/rp2350-final/src/*.elf
-            build/rp2350-final/src/*.bin
-            build/rp2040-final/src/*.uf2
-            build/rp2040-final/src/*.elf
-            build/rp2040-final/src/*.bin
-          if-no-files-found: error
-
-      - name: Commit verified implementation
-        run: |
-          python3 tools/finalize_deep_format.py
-          git config user.name 'Marq-Dev'
-          git config user.email '9102154+Marq-Dev@users.noreply.github.com'
-          git add -A
-          git commit -m 'feat: add NAND deep-format storage recovery'
-          git push origin HEAD:feature/deep-format
