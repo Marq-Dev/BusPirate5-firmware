@@ -39,6 +39,19 @@ if old_write not in text:
     raise SystemExit("newline-preserving writer anchor missing")
 text = text.replace(old_write, new_write, 1)
 
+# FatFS diskio.h has no include guard. Existing callers establish its types
+# before including nand_ftl_diskio.h, so the NAND header must not include it.
+old_nand_header = r'''#define __NAND_FTL_DISKIO_H\n\n#include <stdbool.h>\n#include "fatfs/diskio.h"\n\n'''
+new_nand_header = r'''#define __NAND_FTL_DISKIO_H\n\n#include <stdbool.h>\n\n'''
+if old_nand_header not in text:
+    raise SystemExit("FatFS include-removal anchor missing")
+text = text.replace(old_nand_header, new_nand_header, 1)
+
+# These sequences live inside a Python triple-quoted C replacement. Escape
+# them twice so executing the patcher emits C escapes, not literal NUL/tab.
+text = text.replace(r"'\0'", r"'\\0'")
+text = text.replace(r"'\t'", r"'\\t'")
+
 # Avoid a translation-table migration for one option description. The format
 # usage lines remain explicit, while the option reuses the existing format help
 # key. This keeps the change focused and avoids unrelated translation churn.
