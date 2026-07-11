@@ -23,7 +23,23 @@ jobs:
           fetch-depth: 0
 
       - name: Apply implementation
-        run: python3 tools/run_deep_format_gate.py
+        id: apply
+        continue-on-error: true
+        run: python3 tools/run_deep_format_gate.py > deep-format-gate.log 2>&1
+
+      - name: Upload apply log
+        if: steps.apply.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: deep-format-gate-log
+          path: deep-format-gate.log
+          if-no-files-found: error
+
+      - name: Stop after apply failure
+        if: steps.apply.outcome == 'failure'
+        run: |
+          cat deep-format-gate.log
+          exit 1
 
       - name: Run host and source-contract tests
         run: |
