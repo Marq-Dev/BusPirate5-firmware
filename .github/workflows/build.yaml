@@ -22,49 +22,8 @@ jobs:
           ref: feature/deep-format
           fetch-depth: 0
 
-      - name: Apply implementation without normalizing line endings
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path('tools/apply_deep_format.py')
-          text = path.read_text()
-
-          replacements = {
-              'updated, count = re.subn(pattern, replacement, text, count=1, flags=re.DOTALL)':
-                  'updated, count = re.subn(pattern, lambda _match: replacement, text, count=1, flags=re.DOTALL)',
-              'if "host-tests:" not in workflow:':
-                  'if False and "host-tests:" not in workflow:',
-          }
-          for old, new in replacements.items():
-              if old not in text:
-                  raise SystemExit(f'automation patch anchor missing: {old}')
-              text = text.replace(old, new, 1)
-
-          old_write = '''def write(path: str, content: str) -> None:
-    (ROOT / path).write_text(content, encoding="utf-8", newline="\\n")
-'''
-          new_write = '''def write(path: str, content: str) -> None:
-    target = ROOT / path
-    raw = target.read_bytes()
-    newline = b"\\r\\n" if b"\\r\\n" in raw else b"\\n"
-    normalized = content.replace("\\r\\n", "\\n").replace("\\r", "\\n")
-    encoded = normalized.encode("utf-8")
-    if newline == b"\\r\\n":
-        encoded = encoded.replace(b"\\n", b"\\r\\n")
-    target.write_bytes(encoded)
-'''
-          if old_write not in text:
-              raise SystemExit('newline-preserving writer anchor missing')
-          text = text.replace(old_write, new_write, 1)
-          path.write_text(text)
-          PY
-
-          python3 -m py_compile tools/apply_deep_format.py
-          python3 tools/apply_deep_format.py
-          (cd src/translation && python3 json2h.py)
-          chmod +x tests/host/run_host_tests.sh
-          git diff --check
+      - name: Apply implementation
+        run: python3 tools/run_deep_format_gate.py
 
       - name: Run host and source-contract tests
         run: |
@@ -115,35 +74,7 @@ jobs:
 
       - name: Commit verified implementation
         run: |
-          git show origin/main:.github/workflows/build.yaml > .github/workflows/build.yaml
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path('.github/workflows/build.yaml')
-          text = path.read_text()
-          anchor = 'jobs:\n  build:\n'
-          replacement = '''jobs:
-  host-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run host and contract tests
-        run: |
-          python3 -m unittest tests/test_deep_format_contract.py -v
-          bash tests/host/run_host_tests.sh
-
-  build:
-    needs: host-tests
-'''
-          if text.count(anchor) != 1:
-              raise SystemExit(f'expected one final-workflow anchor, found {text.count(anchor)}')
-          path.write_text(text.replace(anchor, replacement, 1))
-          PY
-
-          rm -f tools/apply_deep_format.py
-          rm -f .github/workflows/deep-format-diagnostic.yml
-          rm -rf build-host build/rp2350-final build/rp2040-final
-          git diff --check
+          python3 tools/finalize_deep_format.py
           git config user.name 'Marq-Dev'
           git config user.email '9102154+Marq-Dev@users.noreply.github.com'
           git add -A
