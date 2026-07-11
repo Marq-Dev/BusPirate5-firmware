@@ -1,0 +1,95 @@
+name: Deep Format One-Shot Implementation
+
+on:
+  push:
+    branches:
+      - feature/deep-format
+
+permissions:
+  contents: write
+
+jobs:
+  implement-and-verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/deep-format
+          fetch-depth: 0
+
+      - name: Install ARM toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            gcc-arm-none-eabi \
+            libnewlib-arm-none-eabi \
+            libstdc++-arm-none-eabi-newlib
+
+      - name: Apply implementation
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('tools/apply_deep_format.py')
+          text = path.read_text()
+          old = 'updated, count = re.subn(pattern, replacement, text, count=1, flags=re.DOTALL)'
+          new = 'updated, count = re.subn(pattern, lambda _match: replacement, text, count=1, flags=re.DOTALL)'
+          if old not in text:
+              raise SystemExit('literal-regex replacement anchor missing')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          python3 -m py_compile tools/apply_deep_format.py
+          python3 tools/apply_deep_format.py
+          (cd src/translation && python3 json2h.py)
+          chmod +x tests/host/run_host_tests.sh
+
+      - name: Run host and source-contract tests
+        run: |
+          python3 -m unittest tests/test_deep_format_contract.py -v
+          bash tests/host/run_host_tests.sh
+
+      - name: Configure and build RP2350 firmware
+        run: |
+          cmake -S . -B build/rp2350-final \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBP_PICO_PLATFORM=rp2350 \
+            -DPICO_SDK_FETCH_FROM_GIT=TRUE \
+            -DPICO_SDK_FETCH_FROM_GIT_TAG:STRING=2.3.0
+          cmake --build build/rp2350-final --target all --parallel 2
+
+      - name: Configure and build RP2040 firmware
+        run: |
+          cmake -S . -B build/rp2040-final \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBP_PICO_PLATFORM=rp2040 \
+            -DPICO_SDK_FETCH_FROM_GIT=TRUE \
+            -DPICO_SDK_FETCH_FROM_GIT_TAG:STRING=2.3.0
+          cmake --build build/rp2040-final --target all --parallel 2
+
+      - name: Upload verified firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: deep-format-verified-firmware
+          path: |
+            build/rp2350-final/src/*.uf2
+            build/rp2350-final/src/*.elf
+            build/rp2350-final/src/*.bin
+            build/rp2040-final/src/*.uf2
+            build/rp2040-final/src/*.elf
+            build/rp2040-final/src/*.bin
+          if-no-files-found: error
+
+      - name: Commit verified implementation
+        run: |
+          rm -f tools/apply_deep_format.py
+          rm -f .github/workflows/deep-format-implementation.yml
+          rm -rf build-host build/rp2350-final build/rp2040-final
+          git diff --check
+          git config user.name 'Marq-Dev'
+          git config user.email '9102154+Marq-Dev@users.noreply.github.com'
+          git add -A
+          git commit -m 'feat: add NAND deep-format storage recovery'
+          git push origin HEAD:feature/deep-format
