@@ -143,6 +143,11 @@ uint8_t storage_format(void) {
     fr = f_mkfs("", 0, work_buffer, FF_MAX_SS);
     mem_free(work_buffer);
     if (fr == FR_OK) {
+        fr = f_mount(&fs, "", 0);
+        if (fr != FR_OK) {
+            return fr;
+        }
+
         #if BP_VER == 5
             #define BP_STORAGE_LABEL "Bus_Pirate5"
         #elif BP_VER == XL5
