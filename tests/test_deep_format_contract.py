@@ -36,6 +36,14 @@ class DeepFormatContractTests(unittest.TestCase):
         ]
         self.assertNotIn("dhara_map_resume(&map", deep_reset)
 
+    def test_disk_command_defines_fatfs_types_before_nand_header(self):
+        source = (ROOT / "src/commands/global/disk.c").read_text()
+        fatfs_include = '#include "fatfs/diskio.h"'
+        nand_include = '#include "nand/nand_ftl_diskio.h"'
+        self.assertIn(fatfs_include, source)
+        self.assertIn(nand_include, source)
+        self.assertLess(source.index(fatfs_include), source.index(nand_include))
+
     def test_deep_option_is_long_only(self):
         source = (ROOT / "src/commands/global/disk.c").read_text()
         self.assertRegex(
