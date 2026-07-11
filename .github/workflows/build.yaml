@@ -1,75 +1,86 @@
 name: CMake
 
 on:
+  push:
+    branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
 
 env:
-  PYTHONDONTWRITEBYTECODE: "1"
+  BUILD_TYPE: Release
+  BUILD_TARGET: all
 
 jobs:
-  package-verified-source:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'feature/deep-format'
+  host-tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: feature/deep-format
-          fetch-depth: 0
+    - uses: actions/checkout@v4
 
-      - name: Apply verified implementation
-        id: apply
-        continue-on-error: true
-        run: python3 tools/run_deep_format_gate.py > /tmp/deep-format-apply.log 2>&1
+    - name: Run host and contract tests
+      run: |
+        python3 -m unittest tests/test_deep_format_contract.py -v
+        bash tests/host/run_host_tests.sh
 
-      - name: Upload apply failure
-        if: steps.apply.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: deep-format-source-apply-log
-          path: /tmp/deep-format-apply.log
-          if-no-files-found: error
+  build:
+    needs: host-tests
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest ]
+        board: [ rp2040, rp2350 ]
 
-      - name: Stop after apply failure
-        if: steps.apply.outcome == 'failure'
-        run: |
-          cat /tmp/deep-format-apply.log
-          exit 1
+    steps:
+    - uses: actions/checkout@v4
 
-      - name: Run host and source-contract tests
-        run: |
-          python3 -m unittest tests/test_deep_format_contract.py -v
-          bash tests/host/run_host_tests.sh
+    - name: Linux setup
+      if: ${{ matrix.os == 'ubuntu-latest' }}
+      run: |
+        sudo apt update && sudo apt install gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib
+        echo "PICO_SDK_FETCH_FROM_GIT=TRUE" >> "$GITHUB_ENV"
 
-      - name: Package final source files
-        run: |
-          mkdir -p verified-source
-          while IFS= read -r path; do
-            mkdir -p "verified-source/$(dirname "$path")"
-            cp "$path" "verified-source/$path"
-          done <<'FILES'
-          src/CMakeLists.txt
-          src/commands/global/disk.c
-          src/commands/global/disk_format_flow.c
-          src/commands/global/disk_format_flow.h
-          src/commands/infrared/tvbgone.c
-          src/lib/bp_args/bp_cmd.c
-          src/lib/bp_args/bp_cmd.h
-          src/nand/nand_ftl_diskio.c
-          src/nand/nand_ftl_diskio.h
-          tests/host/run_host_tests.sh
-          tests/host/test_disk_format_flow.c
-          tests/host/test_tvbgone_macro_scope.c
-          tests/test_deep_format_contract.py
-          docs/commands/format-deep.md
-          FILES
-          git -c core.whitespace=cr-at-eol diff --check
-          find verified-source -type f -print | sort
+    - name: MacOS setup
+      if: ${{ matrix.os == 'macos-latest'}}
+      run: |
+        brew update && brew install --cask gcc-arm-embedded
+        echo "PICO_SDK_FETCH_FROM_GIT=TRUE" >> "$GITHUB_ENV"
 
-      - name: Upload verified source
-        uses: actions/upload-artifact@v4
-        with:
-          name: deep-format-verified-source
-          path: verified-source
-          if-no-files-found: error
+    - name: Windows setup
+      if: ${{ matrix.os == 'windows-latest'}}
+      run: |
+        choco install gcc-arm-embedded
+        git clone https://github.com/raspberrypi/pico-sdk.git -b master --single-branch "$Env:TEMP\pico-sdk"
+        echo "PICO_SDK_PATH=$Env:TEMP\pico-sdk" >> "$env:GITHUB_ENV"
+        cd "$Env:TEMP\pico-sdk"
+        git submodule init
+        git submodule update
+
+    - name: Configure CMake Linux & MacOS
+      if: ${{ matrix.os != 'windows-latest'}}
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DBP_PICO_PLATFORM=${{matrix.board}}
+
+    - name: Configure CMake Windows
+      if: ${{ matrix.os == 'windows-latest'}}
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DBP_PICO_PLATFORM=${{matrix.board}} -DCMAKE_C_COMPILER=C:\ProgramData\chocolatey\bin\arm-none-eabi-gcc.exe -DCMAKE_CXX_COMPILER=C:\ProgramData\chocolatey\bin\arm-none-eabi-g++.exe -G "Unix Makefiles"
+
+    - name: Build
+      if: ${{ matrix.os == 'macos-latest'}}
+      run: cmake --build ${{github.workspace}}/build --target ${{env.BUILD_TARGET}}
+
+    - name: Build
+      if: ${{ matrix.os != 'macos-latest'}}
+      run: cmake --build ${{github.workspace}}/build --parallel --target ${{env.BUILD_TARGET}}
+
+    - name: Save Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: firmware-${{ matrix.board }}-${{ matrix.os }}
+        path: |
+          ${{github.workspace}}/build/src/bus_pirate*.bin
+          ${{github.workspace}}/build/src/bus_pirate*.dis
+          ${{github.workspace}}/build/src/bus_pirate*.elf
+          ${{github.workspace}}/build/src/bus_pirate*.elf.map
+          ${{github.workspace}}/build/src/bus_pirate*.uf2
+        retention-days: 7
+        if-no-files-found: error
