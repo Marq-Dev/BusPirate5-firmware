@@ -389,6 +389,10 @@ void insert_usbmsdrive(void) {
 
 // eject and insert the usbms drive to force the host to sync its contents
 void refresh_usbmsdrive(void) {
+    if (is_ejected()) {
+        return;
+    }
+
     // eject the usb drive
     eject_usbmsdrive();
     // insert the drive back
