@@ -13,6 +13,11 @@ class DeepFormatContractTests(unittest.TestCase):
         self.assertIn("bool bp_cmd_find_long_flag", source)
         self.assertIn("tok_eq(name_start, name_len, long_name)", source)
 
+    def test_generated_parser_has_no_literal_nul_bytes(self):
+        source = (ROOT / "src/lib/bp_args/bp_cmd.c").read_bytes()
+        self.assertNotIn(b"\x00", source)
+        self.assertIn(b"'\\0'", source)
+
     def test_flow_is_compiled(self):
         cmake = (ROOT / "src/CMakeLists.txt").read_text()
         self.assertIn("commands/global/disk_format_flow.c", cmake)
@@ -22,6 +27,7 @@ class DeepFormatContractTests(unittest.TestCase):
         source = (ROOT / "src/nand/nand_ftl_diskio.c").read_text()
         self.assertIn("diskio_deep_reset_result_t", header)
         self.assertIn("diskio_deep_reset(BYTE drv", header)
+        self.assertNotIn('#include "fatfs/diskio.h"', header)
         self.assertIn("spi_nand_clear()", source)
         self.assertIn("dhara_map_init(&map", source)
         deep_reset = source[
