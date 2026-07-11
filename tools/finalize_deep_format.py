@@ -12,6 +12,7 @@ base_workflow = subprocess.check_output(
     ["git", "show", "origin/main:.github/workflows/build.yaml"],
     cwd=ROOT,
 ).decode("utf-8")
+base_workflow = base_workflow.replace("\r\n", "\n").replace("\r", "\n")
 
 anchor = "jobs:\n  build:\n"
 replacement = '''jobs:
