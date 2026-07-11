@@ -8,6 +8,9 @@ on:
 permissions:
   contents: write
 
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+
 jobs:
   finalize-verified-source:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'feature/deep-format'
@@ -36,21 +39,26 @@ jobs:
             git config user.name 'Marq-Dev'
             git config user.email '9102154+Marq-Dev@users.noreply.github.com'
             git add -A
+            if git diff --cached --name-only | grep -q '^.github/workflows/'; then
+              echo 'Refusing to push workflow changes with the Actions token.'
+              git diff --cached --name-only
+              exit 1
+            fi
             git status --short
             git commit -m 'feat: add NAND deep-format storage recovery'
             git push origin HEAD:feature/deep-format
-          } > deep-format-finalize.log 2>&1
+          } > /tmp/deep-format-finalize.log 2>&1
 
       - name: Upload finalization log
         if: steps.finalize.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: deep-format-finalize-log
-          path: deep-format-finalize.log
+          path: /tmp/deep-format-finalize.log
           if-no-files-found: error
 
       - name: Stop after finalization failure
         if: steps.finalize.outcome == 'failure'
         run: |
-          cat deep-format-finalize.log
+          cat /tmp/deep-format-finalize.log
           exit 1
