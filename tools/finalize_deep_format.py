@@ -53,4 +53,7 @@ for relative in (
     if path.exists():
         shutil.rmtree(path)
 
-subprocess.check_call(["git", "diff", "--check"], cwd=ROOT)
+subprocess.check_call(
+    ["git", "-c", "core.whitespace=cr-at-eol", "diff", "--check"],
+    cwd=ROOT,
+)
