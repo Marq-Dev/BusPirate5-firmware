@@ -50,4 +50,7 @@ subprocess.check_call([sys.executable, str(PATCHER)], cwd=ROOT)
 
 runner = ROOT / "tests" / "host" / "run_host_tests.sh"
 os.chmod(runner, runner.stat().st_mode | 0o111)
-subprocess.check_call(["git", "diff", "--check"], cwd=ROOT)
+subprocess.check_call(
+    ["git", "-c", "core.whitespace=cr-at-eol", "diff", "--check"],
+    cwd=ROOT,
+)
