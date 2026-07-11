@@ -22,6 +22,12 @@
 #include "pirate/mem.h"
 #include "lib/bp_args/bp_cmd.h"
 #include "pirate/file.h"
+#include "commands/global/disk_format_flow.h"
+#include "msc_disk.h"
+#ifdef BP_HW_STORAGE_NAND
+#include "fatfs/diskio.h"
+#include "nand/nand_ftl_diskio.h"
+#endif
 
 static const char* const cat_usage[] = {
     "cat <file>",
@@ -262,6 +268,47 @@ void disk_ls_handler(struct command_result* res) {
     }
 }
 
+static bool disk_deep_reset_adapter(int *stage, int *status) {
+#ifdef BP_HW_STORAGE_NAND
+    diskio_deep_reset_result_t result;
+    const bool ok = diskio_deep_reset(0, &result);
+    *stage = (int)result.stage;
+    *status = result.status;
+    return ok;
+#else
+    *stage = 0;
+    *status = 0;
+    return false;
+#endif
+}
+
+static const disk_format_deep_ops_t disk_deep_ops = {
+    .eject_usb = eject_usbmsdrive,
+    .unmount_storage = storage_unmount,
+    .reset_storage = disk_deep_reset_adapter,
+    .format_storage = storage_format,
+    .mount_storage = storage_mount,
+    .insert_usb = insert_usbmsdrive,
+};
+
+#ifdef BP_HW_STORAGE_NAND
+static const char *disk_deep_reset_stage_name(int stage) {
+    switch ((diskio_deep_reset_stage_t)stage) {
+        case DISKIO_DEEP_RESET_STAGE_INVALID_DRIVE:
+            return "drive validation";
+        case DISKIO_DEEP_RESET_STAGE_NAND_INIT:
+            return "NAND initialization";
+        case DISKIO_DEEP_RESET_STAGE_NAND_ERASE:
+            return "physical NAND erase";
+        case DISKIO_DEEP_RESET_STAGE_FTL_INIT:
+            return "FTL initialization";
+        case DISKIO_DEEP_RESET_STAGE_NONE:
+        default:
+            return "unknown stage";
+    }
+}
+#endif
+
 uint8_t disk_format(void) {
     // make the file system
     FRESULT fr = storage_format();
@@ -290,13 +337,16 @@ uint8_t disk_format(void) {
 }
 
 static const char* const format_usage[] = {
-    "format [-y]",
-    "Format storage:%s format",
+    "format [-y] [--deep]",
+    "Format FAT filesystem:%s format",
     "Format without confirmation:%s format -y",
+    "Raw erase NAND, rebuild FTL and FAT:%s format --deep",
+    "Deep format without confirmation:%s format --deep -y",
 };
 
 static const bp_command_opt_t disk_format_opts[] = {
-    { "yes", 'y', BP_ARG_NONE, NULL, T_HELP_FLASH_YES_OVERRIDE },
+    { "yes",  'y', BP_ARG_NONE, NULL, T_HELP_FLASH_YES_OVERRIDE },
+    { "deep",  0,  BP_ARG_NONE, NULL, T_HELP_DISK_FORMAT },
     { 0 }
 };
 
@@ -311,20 +361,96 @@ const bp_command_def_t disk_format_def = {
 };
 
 void disk_format_handler(struct command_result* res) {
-    // check help
     if (bp_cmd_help_check(&disk_format_def, res->help_flag)) {
         return;
     }
 
-    if (!bp_cmd_confirm(&disk_format_def, "Erase the internal storage?")) {
+    const bool deep =
+        bp_cmd_find_long_flag(&disk_format_def, "deep");
+
+#ifndef BP_HW_STORAGE_NAND
+    if (deep) {
+        printf("Error: Deep format is only supported on NAND-backed Bus Pirate models.\r\n");
+        res->error = true;
+        return;
+    }
+#endif
+
+    if (deep) {
+        if (!bp_cmd_confirm(&disk_format_def,
+                            "Deep format raw NAND storage?")) {
+            return;
+        }
+        if (!bp_cmd_confirm(
+                &disk_format_def,
+                "Are you sure? ALL STORAGE DATA AND MAPPING STATE WILL BE ERASED.")) {
+            return;
+        }
+    } else {
+        if (!bp_cmd_confirm(&disk_format_def,
+                            "Erase the internal storage?")) {
+            return;
+        }
+        if (!bp_cmd_confirm(
+                &disk_format_def,
+                "Are you sure? ALL DATA WILL BE ERASED.")) {
+            return;
+        }
+    }
+
+    if (deep) {
+        printf("\r\n\r\nDeep formatting NAND storage...\r\n");
+        printf("[1/4] Ejecting and unmounting storage\r\n");
+        printf("[2/4] Erasing physical NAND blocks\r\n");
+
+        const disk_format_deep_result_t result =
+            disk_format_deep_run(true, &disk_deep_ops);
+
+        switch (result.status) {
+            case DISK_FORMAT_DEEP_OK:
+                printf("[3/4] Reinitialized flash translation layer\r\n");
+                printf("[4/4] Created and mounted FAT filesystem\r\n");
+                printf("Storage mounted: %7.2f GB %s\r\n",
+                       system_config.storage_size,
+                       storage_fat_type_labels[
+                           system_config.storage_fat_type - 1]);
+                printf("Deep format success!\r\n\r\n");
+                return;
+
+            case DISK_FORMAT_DEEP_RESET_FAILED:
+#ifdef BP_HW_STORAGE_NAND
+                printf("Error: Deep reset failed during %s (status %d).\r\n",
+                       disk_deep_reset_stage_name(result.reset_stage),
+                       result.reset_status);
+#else
+                printf("Error: Deep reset failed (status %d).\r\n",
+                       result.reset_status);
+#endif
+                break;
+
+            case DISK_FORMAT_DEEP_FORMAT_FAILED:
+                storage_file_error(result.fatfs_status);
+                printf("\r\nError: FAT creation failed after NAND reset.\r\n");
+                break;
+
+            case DISK_FORMAT_DEEP_MOUNT_FAILED:
+                storage_file_error(result.fatfs_status);
+                printf("\r\nError: Mount failed after deep format.\r\n");
+                break;
+
+            case DISK_FORMAT_DEEP_UNSUPPORTED:
+            default:
+                printf("Error: Deep format is unavailable.\r\n");
+                break;
+        }
+
+        system_config.storage_available = false;
+        res->error = true;
         return;
     }
 
-    if (!bp_cmd_confirm(&disk_format_def, "Are you sure? ALL DATA WILL BE ERASED.")) {
-        return;
-    }
     printf("\r\n\r\nFormatting...\r\n");
-    uint8_t format_status = disk_format();
+    const uint8_t format_status = disk_format();
     if (format_status != FR_OK) {
         storage_file_error(format_status);
         res->error = true;

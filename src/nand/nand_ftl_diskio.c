@@ -5,6 +5,7 @@
  *
  */
 #include <stdint.h>
+#include <string.h>
 #include "pico/stdlib.h"
 #include "pico/mutex.h"
 #include "pirate.h"
@@ -52,6 +53,77 @@ DSTATUS diskio_initialize(BYTE drv) {
     // TODO: Flag statuses from dhara that do not indicate an empty map
     initialized = true;
     return 0;
+}
+
+static void set_deep_reset_result(
+    diskio_deep_reset_result_t *result,
+    diskio_deep_reset_stage_t stage,
+    int status) {
+    if (result) {
+        result->stage = stage;
+        result->status = status;
+    }
+}
+
+bool diskio_deep_reset(BYTE drv,
+                       diskio_deep_reset_result_t *result) {
+    set_deep_reset_result(result,
+                          DISKIO_DEEP_RESET_STAGE_NONE,
+                          SPI_NAND_RET_OK);
+
+    if (drv) {
+        set_deep_reset_result(result,
+                              DISKIO_DEEP_RESET_STAGE_INVALID_DRIVE,
+                              STA_NOINIT);
+        return false;
+    }
+
+    if (!mutex_is_initialized(&diskio_mutex)) {
+        mutex_init(&diskio_mutex);
+    }
+
+    mutex_enter_blocking(&diskio_mutex);
+    initialized = false;
+
+    memset(&dhara_nand_parameters, 0,
+           sizeof(dhara_nand_parameters));
+    memset(&map, 0, sizeof(map));
+    memset(page_buffer, 0xff, sizeof(page_buffer));
+
+    int status = spi_nand_init(&dhara_nand_parameters);
+    if (status != SPI_NAND_RET_OK) {
+        set_deep_reset_result(result,
+                              DISKIO_DEEP_RESET_STAGE_NAND_INIT,
+                              status);
+        mutex_exit(&diskio_mutex);
+        return false;
+    }
+
+    status = spi_nand_clear();
+    if (status != SPI_NAND_RET_OK) {
+        set_deep_reset_result(result,
+                              DISKIO_DEEP_RESET_STAGE_NAND_ERASE,
+                              status);
+        mutex_exit(&diskio_mutex);
+        return false;
+    }
+
+    dhara_map_init(&map,
+                   &dhara_nand_parameters,
+                   page_buffer,
+                   4);
+
+    if (dhara_map_capacity(&map) == 0) {
+        set_deep_reset_result(result,
+                              DISKIO_DEEP_RESET_STAGE_FTL_INIT,
+                              -1);
+        mutex_exit(&diskio_mutex);
+        return false;
+    }
+
+    initialized = true;
+    mutex_exit(&diskio_mutex);
+    return true;
 }
 
 DSTATUS diskio_status(BYTE drv) {

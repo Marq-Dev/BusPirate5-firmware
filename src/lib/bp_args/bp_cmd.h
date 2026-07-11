@@ -273,6 +273,15 @@ bool bp_cmd_get_action(const bp_command_def_t *def, uint32_t *action);
 bool bp_cmd_find_flag(const bp_command_def_t *def, char flag);
 
 /**
+ * @brief Check whether an exact named long option is present.
+ * @param def        Command definition used to identify and skip option values.
+ * @param long_name  Long option name without the leading "--".
+ * @return true if the exact long option is present.
+ */
+bool bp_cmd_find_long_flag(const bp_command_def_t *def,
+                           const char *long_name);
+
+/**
  * @brief Check if -h or --help is present on the command line.
  * @details Lightweight scanner that does not require a command definition.
  *          Matches standalone "-h" token or "--help" anywhere in the

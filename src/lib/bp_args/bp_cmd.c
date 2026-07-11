@@ -332,6 +332,77 @@ bool bp_cmd_find_flag(const bp_command_def_t *def, char flag) {
     return cmd_scan_flag(def, flag, &val, &val_len);
 }
 
+bool bp_cmd_find_long_flag(const bp_command_def_t *def,
+                           const char *long_name) {
+    if (!def || !long_name || !*long_name) {
+        return false;
+    }
+
+    const char *p = ln_cmdln_current();
+    const char *end = p + ln_cmdln_remaining();
+
+    p = skip_ws(p, end);
+    p = skip_tok(p, end);
+
+    while (p < end) {
+        p = skip_ws(p, end);
+        if (p >= end || *p == '\0') {
+            break;
+        }
+
+        if (*p == '-' && p + 1 < end && p[1] == '-') {
+            p += 2;
+            const char *name_start = p;
+            while (p < end && *p != '=' && *p != ' ' &&
+                   *p != '\t' && *p != '\0') {
+                p++;
+            }
+            const size_t name_len = (size_t)(p - name_start);
+            const bp_command_opt_t *opt =
+                find_opt_by_long_name(def, name_start, name_len);
+            const bool match = opt &&
+                tok_eq(name_start, name_len, long_name);
+
+            if (match && opt->arg_type == BP_ARG_NONE &&
+                !(p < end && *p == '=')) {
+                return true;
+            }
+
+            if (p < end && *p == '=') {
+                p = skip_tok(p, end);
+            } else if (opt && opt->arg_type != BP_ARG_NONE) {
+                p = skip_ws(p, end);
+                if (p < end && *p != '-' && *p != '\0') {
+                    p = skip_tok(p, end);
+                }
+            }
+            continue;
+        }
+
+        if (*p == '-' && p + 1 < end && p[1] != '-' &&
+            p[1] != ' ' && p[1] != '\0') {
+            const char opt_char = p[1];
+            p += 2;
+            const bp_command_opt_t *opt =
+                find_opt_in_def(def, opt_char | 0x20);
+            if (!opt) {
+                opt = find_opt_in_def(def, opt_char);
+            }
+            if (opt && opt->arg_type != BP_ARG_NONE) {
+                p = skip_ws(p, end);
+                if (p < end && *p != '-' && *p != '\0') {
+                    p = skip_tok(p, end);
+                }
+            }
+            continue;
+        }
+
+        p = skip_tok(p, end);
+    }
+
+    return false;
+}
+
 bool bp_cmd_has_help_flag(void) {
     const char *p = ln_cmdln_current();
     const char *end = p + ln_cmdln_remaining();

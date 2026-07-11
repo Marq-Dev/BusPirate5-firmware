@@ -178,6 +178,8 @@ set(buspirate_common
         commands/global/txtest.h
         commands/global/disk.c
         commands/global/disk.h
+        commands/global/disk_format_flow.c
+        commands/global/disk_format_flow.h
         commands/global/v_adc.c
         commands/global/v_adc.h
         commands/global/i_info.c

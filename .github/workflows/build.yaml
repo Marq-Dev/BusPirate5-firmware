@@ -12,7 +12,18 @@ env:
   BUILD_TARGET: all
 
 jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Run host and contract tests
+      run: |
+        python3 -m unittest tests/test_deep_format_contract.py -v
+        bash tests/host/run_host_tests.sh
+
   build:
+    needs: host-tests
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -60,7 +71,6 @@ jobs:
     - name: Build
       if: ${{ matrix.os != 'macos-latest'}}
       run: cmake --build ${{github.workspace}}/build --parallel --target ${{env.BUILD_TARGET}}
-
 
     - name: Save Artifacts
       uses: actions/upload-artifact@v4
