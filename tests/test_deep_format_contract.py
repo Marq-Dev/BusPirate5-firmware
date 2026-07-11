@@ -67,6 +67,18 @@ class DeepFormatContractTests(unittest.TestCase):
         mount_failure = source.index("DISK_FORMAT_DEEP_MOUNT_FAILED")
         self.assertGreater(insert_at, mount_failure)
 
+    def test_storage_format_registers_work_area_before_setting_label(self):
+        source = (ROOT / "src/pirate/storage.c").read_text()
+        format_body = source[
+            source.index("uint8_t storage_format(void)"):
+            source.index("bool storage_save_binary_blob_rollover")
+        ]
+        mkfs_at = format_body.index("f_mkfs(")
+        mount_at = format_body.index('f_mount(&fs, "", 0)', mkfs_at)
+        label_at = format_body.index("f_setlabel(", mkfs_at)
+        self.assertLess(mkfs_at, mount_at)
+        self.assertLess(mount_at, label_at)
+
     def test_documentation_exists(self):
         doc = (ROOT / "docs/commands/format-deep.md").read_text()
         self.assertIn("format --deep -y", doc)
