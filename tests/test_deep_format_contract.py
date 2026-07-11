@@ -79,6 +79,18 @@ class DeepFormatContractTests(unittest.TestCase):
         self.assertLess(mkfs_at, mount_at)
         self.assertLess(mount_at, label_at)
 
+    def test_label_refresh_preserves_an_already_ejected_medium(self):
+        source = (ROOT / "src/msc_disk.c").read_text()
+        refresh_body = source[
+            source.index("void refresh_usbmsdrive(void)"):
+            source.index("void prepare_usbmsdrive_readonly(void)")
+        ]
+        ejected_check = refresh_body.index("is_ejected()")
+        eject_call = refresh_body.index("eject_usbmsdrive()")
+        insert_call = refresh_body.index("insert_usbmsdrive()")
+        self.assertLess(ejected_check, eject_call)
+        self.assertLess(eject_call, insert_call)
+
     def test_documentation_exists(self):
         doc = (ROOT / "docs/commands/format-deep.md").read_text()
         self.assertIn("format --deep -y", doc)
