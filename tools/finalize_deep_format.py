@@ -6,44 +6,24 @@ import shutil
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW = ROOT / ".github" / "workflows" / "build.yaml"
 
-base_workflow = subprocess.check_output(
-    ["git", "show", "origin/main:.github/workflows/build.yaml"],
-    cwd=ROOT,
-).decode("utf-8")
-base_workflow = base_workflow.replace("\r\n", "\n").replace("\r", "\n")
-
-anchor = "jobs:\n  build:\n"
-replacement = '''jobs:
-  host-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run host and contract tests
-        run: |
-          python3 -m unittest tests/test_deep_format_contract.py -v
-          bash tests/host/run_host_tests.sh
-
-  build:
-    needs: host-tests
-'''
-if base_workflow.count(anchor) != 1:
-    raise SystemExit(
-        f"expected one final-workflow anchor, found {base_workflow.count(anchor)}"
-    )
-WORKFLOW.write_text(base_workflow.replace(anchor, replacement, 1), encoding="utf-8")
-
+# The GitHub Actions token can push source changes but cannot update workflow
+# files. Workflow cleanup is performed afterward through the authorized GitHub
+# connector in one atomic commit.
 for relative in (
     "tools/apply_deep_format.py",
     "tools/run_deep_format_gate.py",
     "tools/finalize_deep_format.py",
-    ".github/workflows/deep-format-diagnostic.yml",
     "docs/deep-format-ci-trigger.txt",
+    "deep-format-finalize.log",
 ):
     path = ROOT / relative
     if path.exists():
         path.unlink()
+
+for cache_dir in sorted(ROOT.rglob("__pycache__"), reverse=True):
+    if cache_dir.is_dir():
+        shutil.rmtree(cache_dir)
 
 for relative in (
     "build-host",
