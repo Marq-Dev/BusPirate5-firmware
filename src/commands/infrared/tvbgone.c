@@ -35,6 +35,8 @@ Ported to RP2040 by Ian Lesnet 2024 (see you in another 15 years?)
 #include "pico/stdlib.h"
 #include "pirate.h"
 #include "tvbgone-codes.h" //include TVBGone code data
+#undef uint8_t
+#undef uint16_t
 #include "bytecode.h"
 #include "command_struct.h"
 #include "mode/infrared-struct.h"
@@ -257,4 +259,3 @@ volatile void delayint10US(unsigned int delay){
 //bits=NApowerCodes[i]->bitcompression;
 //sample=NApowerCodes[i]->samples[0];
 //times=NApowerCodes[i]->times[0];
-
