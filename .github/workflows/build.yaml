@@ -24,6 +24,35 @@ jobs:
           ref: feature/deep-format
           fetch-depth: 0
 
+      - name: Apply implementation
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('tools/apply_deep_format.py')
+          text = path.read_text()
+          replacements = {
+              'updated, count = re.subn(pattern, replacement, text, count=1, flags=re.DOTALL)':
+                  'updated, count = re.subn(pattern, lambda _match: replacement, text, count=1, flags=re.DOTALL)',
+              'if "host-tests:" not in workflow:':
+                  'if False and "host-tests:" not in workflow:',
+          }
+          for old, new in replacements.items():
+              if old not in text:
+                  raise SystemExit(f'automation patch anchor missing: {old}')
+              text = text.replace(old, new, 1)
+          path.write_text(text)
+          PY
+          python3 -m py_compile tools/apply_deep_format.py
+          python3 tools/apply_deep_format.py 2>&1 | tee /tmp/deep-format-apply.log
+          (cd src/translation && python3 json2h.py)
+          chmod +x tests/host/run_host_tests.sh
+          git diff --check
+
+      - name: Run host and source-contract tests
+        run: |
+          python3 -m unittest tests/test_deep_format_contract.py -v
+          bash tests/host/run_host_tests.sh
+
       - name: Install ARM toolchain
         run: |
           sudo apt-get update
@@ -34,29 +63,6 @@ jobs:
             gcc-arm-none-eabi \
             libnewlib-arm-none-eabi \
             libstdc++-arm-none-eabi-newlib
-
-      - name: Apply implementation
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path('tools/apply_deep_format.py')
-          text = path.read_text()
-          old = 'updated, count = re.subn(pattern, replacement, text, count=1, flags=re.DOTALL)'
-          new = 'updated, count = re.subn(pattern, lambda _match: replacement, text, count=1, flags=re.DOTALL)'
-          if old not in text:
-              raise SystemExit('literal-regex replacement anchor missing')
-          path.write_text(text.replace(old, new, 1))
-          PY
-          python3 -m py_compile tools/apply_deep_format.py
-          python3 tools/apply_deep_format.py
-          (cd src/translation && python3 json2h.py)
-          chmod +x tests/host/run_host_tests.sh
-          git diff --check
-
-      - name: Run host and source-contract tests
-        run: |
-          python3 -m unittest tests/test_deep_format_contract.py -v
-          bash tests/host/run_host_tests.sh
 
       - name: Configure and build RP2350 firmware
         run: |
