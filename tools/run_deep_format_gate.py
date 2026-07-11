@@ -39,13 +39,30 @@ if old_write not in text:
     raise SystemExit("newline-preserving writer anchor missing")
 text = text.replace(old_write, new_write, 1)
 
-# FatFS diskio.h has no include guard. Existing callers establish its types
-# before including nand_ftl_diskio.h, so the NAND header must not include it.
+# FatFS diskio.h has no include guard. Existing low-level callers establish its
+# types before including nand_ftl_diskio.h, so that header must not include it.
 old_nand_header = r'''#define __NAND_FTL_DISKIO_H\n\n#include <stdbool.h>\n#include "fatfs/diskio.h"\n\n'''
 new_nand_header = r'''#define __NAND_FTL_DISKIO_H\n\n#include <stdbool.h>\n\n'''
 if old_nand_header not in text:
     raise SystemExit("FatFS include-removal anchor missing")
 text = text.replace(old_nand_header, new_nand_header, 1)
+
+# disk.c is the new direct consumer of the NAND interface. Define FatFS disk
+# types there immediately before the original, non-self-contained NAND header.
+old_disk_includes = '''#include "msc_disk.h"
+#ifdef BP_HW_STORAGE_NAND
+#include "nand/nand_ftl_diskio.h"
+#endif
+'''
+new_disk_includes = '''#include "msc_disk.h"
+#ifdef BP_HW_STORAGE_NAND
+#include "fatfs/diskio.h"
+#include "nand/nand_ftl_diskio.h"
+#endif
+'''
+if old_disk_includes not in text:
+    raise SystemExit("disk.c FatFS include-order anchor missing")
+text = text.replace(old_disk_includes, new_disk_includes, 1)
 
 # These sequences live inside a Python triple-quoted C replacement. Escape
 # them twice so executing the patcher emits C escapes, not literal NUL/tab.
