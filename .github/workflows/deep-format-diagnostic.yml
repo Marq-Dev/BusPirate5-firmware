@@ -1,29 +1,30 @@
-name: Deep Format Diagnostic
+name: Deep Format Implementation Gate
 
 on:
   pull_request:
     branches: [ "main" ]
 
+permissions:
+  contents: write
+
 jobs:
-  diagnose:
+  implement-and-verify:
     if: github.event.pull_request.head.ref == 'feature/deep-format'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feature/deep-format
+          fetch-depth: 0
 
-      - name: Run implementation stages with captured output
-        id: diagnose
-        continue-on-error: true
+      - name: Apply implementation without normalizing line endings
         run: |
-          mkdir -p diagnostic
-          set +e
-
-          python3 - <<'PY' > diagnostic/runtime-patch.log 2>&1
+          python3 - <<'PY'
           from pathlib import Path
+
           path = Path('tools/apply_deep_format.py')
           text = path.read_text()
+
           replacements = {
               'updated, count = re.subn(pattern, replacement, text, count=1, flags=re.DOTALL)':
                   'updated, count = re.subn(pattern, lambda _match: replacement, text, count=1, flags=re.DOTALL)',
@@ -34,37 +35,160 @@ jobs:
               if old not in text:
                   raise SystemExit(f'automation patch anchor missing: {old}')
               text = text.replace(old, new, 1)
+
+          old_write = '''def write(path: str, content: str) -> None:
+    (ROOT / path).write_text(content, encoding="utf-8", newline="\\n")
+'''
+          new_write = '''def write(path: str, content: str) -> None:
+    target = ROOT / path
+    raw = target.read_bytes()
+    newline = b"\\r\\n" if b"\\r\\n" in raw else b"\\n"
+    normalized = content.replace("\\r\\n", "\\n").replace("\\r", "\\n")
+    encoded = normalized.encode("utf-8")
+    if newline == b"\\r\\n":
+        encoded = encoded.replace(b"\\n", b"\\r\\n")
+    target.write_bytes(encoded)
+'''
+          if old_write not in text:
+              raise SystemExit('newline-preserving writer anchor missing')
+          text = text.replace(old_write, new_write, 1)
           path.write_text(text)
           PY
-          runtime_status=$?
 
-          python3 -m py_compile tools/apply_deep_format.py \
-            > diagnostic/py-compile.log 2>&1
-          compile_status=$?
+          python3 -m py_compile tools/apply_deep_format.py
+          python3 tools/apply_deep_format.py
+          (cd src/translation && python3 json2h.py)
+          chmod +x tests/host/run_host_tests.sh
+          git diff --check
 
-          python3 tools/apply_deep_format.py \
-            > diagnostic/apply.log 2>&1
-          apply_status=$?
+      - name: Run host and source-contract tests
+        run: |
+          python3 -m unittest tests/test_deep_format_contract.py -v
+          bash tests/host/run_host_tests.sh
 
-          (cd src/translation && python3 json2h.py) \
-            > diagnostic/translation.log 2>&1
-          translation_status=$?
+      - name: Install ARM toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            gcc-arm-none-eabi \
+            libnewlib-arm-none-eabi \
+            libstdc++-arm-none-eabi-newlib
 
-          git diff --check > diagnostic/diff-check.log 2>&1
-          diff_status=$?
+      - name: Configure and build RP2350 firmware
+        run: |
+          cmake -S . -B build/rp2350-final \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBP_PICO_PLATFORM=rp2350 \
+            -DPICO_SDK_FETCH_FROM_GIT=TRUE \
+            -DPICO_SDK_FETCH_FROM_GIT_TAG:STRING=2.3.0
+          cmake --build build/rp2350-final --target all --parallel 2
 
-          {
-            echo "runtime_patch=$runtime_status"
-            echo "py_compile=$compile_status"
-            echo "apply=$apply_status"
-            echo "translation=$translation_status"
-            echo "diff_check=$diff_status"
-          } | tee diagnostic/status.txt
+      - name: Configure and build RP2040 firmware
+        run: |
+          cmake -S . -B build/rp2040-final \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBP_PICO_PLATFORM=rp2040 \
+            -DPICO_SDK_FETCH_FROM_GIT=TRUE \
+            -DPICO_SDK_FETCH_FROM_GIT_TAG:STRING=2.3.0
+          cmake --build build/rp2040-final --target all --parallel 2
 
-      - name: Upload diagnostic logs
-        if: always()
+      - name: Upload verified firmware
         uses: actions/upload-artifact@v4
         with:
-          name: deep-format-diagnostic
-          path: diagnostic
+          name: deep-format-verified-firmware
+          path: |
+            build/rp2350-final/src/*.uf2
+            build/rp2350-final/src/*.elf
+            build/rp2350-final/src/*.bin
+            build/rp2040-final/src/*.uf2
+            build/rp2040-final/src/*.elf
+            build/rp2040-final/src/*.bin
           if-no-files-found: error
+
+      - name: Commit verified implementation
+        run: |
+          cat > .github/workflows/build.yaml <<'YAML'
+          name: CMake
+
+          on:
+            push:
+              branches: [ "main" ]
+            pull_request:
+              branches: [ "main" ]
+            workflow_dispatch:
+
+          env:
+            BUILD_TYPE: Release
+            BUILD_TARGET: all
+
+          jobs:
+            host-tests:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@v4
+                - name: Run host and contract tests
+                  run: |
+                    python3 -m unittest tests/test_deep_format_contract.py -v
+                    bash tests/host/run_host_tests.sh
+
+            build:
+              needs: host-tests
+              runs-on: ${{ matrix.os }}
+              strategy:
+                fail-fast: false
+                matrix:
+                  os: [ ubuntu-latest, macos-latest ]
+                  board: [ rp2040, rp2350 ]
+
+              steps:
+                - uses: actions/checkout@v4
+
+                - name: Linux setup
+                  if: ${{ matrix.os == 'ubuntu-latest' }}
+                  run: |
+                    sudo apt update && sudo apt install gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib
+                    echo "PICO_SDK_FETCH_FROM_GIT=TRUE" >> "$GITHUB_ENV"
+
+                - name: MacOS setup
+                  if: ${{ matrix.os == 'macos-latest' }}
+                  run: |
+                    brew update && brew install --cask gcc-arm-embedded
+                    echo "PICO_SDK_FETCH_FROM_GIT=TRUE" >> "$GITHUB_ENV"
+
+                - name: Configure CMake
+                  run: cmake -B ${{ github.workspace }}/build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DBP_PICO_PLATFORM=${{ matrix.board }}
+
+                - name: Build
+                  if: ${{ matrix.os == 'macos-latest' }}
+                  run: cmake --build ${{ github.workspace }}/build --target ${{ env.BUILD_TARGET }}
+
+                - name: Build
+                  if: ${{ matrix.os != 'macos-latest' }}
+                  run: cmake --build ${{ github.workspace }}/build --parallel --target ${{ env.BUILD_TARGET }}
+
+                - name: Save Artifacts
+                  uses: actions/upload-artifact@v4
+                  with:
+                    name: firmware-${{ matrix.board }}-${{ matrix.os }}
+                    path: |
+                      ${{ github.workspace }}/build/src/bus_pirate*.bin
+                      ${{ github.workspace }}/build/src/bus_pirate*.dis
+                      ${{ github.workspace }}/build/src/bus_pirate*.elf
+                      ${{ github.workspace }}/build/src/bus_pirate*.elf.map
+                      ${{ github.workspace }}/build/src/bus_pirate*.uf2
+                    retention-days: 7
+                    if-no-files-found: error
+          YAML
+
+          rm -f tools/apply_deep_format.py
+          rm -f .github/workflows/deep-format-diagnostic.yml
+          rm -rf build-host build/rp2350-final build/rp2040-final
+          git diff --check
+          git config user.name 'Marq-Dev'
+          git config user.email '9102154+Marq-Dev@users.noreply.github.com'
+          git add -A
+          git commit -m 'feat: add NAND deep-format storage recovery'
+          git push origin HEAD:feature/deep-format
